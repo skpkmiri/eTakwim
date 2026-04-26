@@ -38,13 +38,30 @@
         import { getAnalytics } from 'firebase/analytics';
         import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
         import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
-        import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, CheckCircle, XCircle, Clock, Plus, Trash2, ShieldAlert, UserCircle, List } from 'lucide-react';
+        import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, CheckCircle, XCircle, Clock, Plus, Trash2, ShieldAlert, UserCircle, List, Edit } from 'lucide-react';
 
-        // --- Senarai IC Penolong Kanan ---
+        // --- Senarai IC & Peranan Penolong Kanan/Guru Besar ---
         const REKOD_PK = [
-            { nama: 'Mohamad Abidin bin Sipek', jawatan: 'PK Pentadbiran', ic: '910110136471' },
-            { nama: 'Ling Mee Choo', jawatan: 'PK HEM', ic: '880927135284' },
-            { nama: 'Salihin bin Ahmad', jawatan: 'PK Kokurikulum', ic: '920422135815' }
+            { nama: 'Aziz bin Tahir', jawatan: 'Pentadbiran', ic: '000000000000', units: ['Pentadbiran'] }, // IC akan dikemaskini
+            { nama: 'Mohamad Abidin bin Sipek', jawatan: 'PK Pentadbiran & Kurikulum', ic: '910110136471', units: ['Pentadbiran', 'Kurikulum'] },
+            { nama: 'Ling Mee Choo', jawatan: 'PK HEM', ic: '880927135284', units: ['Hal Ehwal Murid (HEM)'] },
+            { nama: 'Salihin bin Ahmad', jawatan: 'PK Kokurikulum', ic: '920422135815', units: ['Kokurikulum'] }
+        ];
+
+        // --- Senarai Nama Guru & Staf ---
+        const SENARAI_GURU = [
+            "AIDA MASTURINA BINTI HAMKA", "AIFA NUR BESTARI BINTI RADUAN", "ALEXANDER LIPA ANAK RANTIE", 
+            "AZENI BIN MAT", "AZIZ BIN TAHIR", "BRYAN ANAK CONSTANT", "CHRISTIAN SIMON", 
+            "DLIYANA ANAK JOHN", "EIFILISIA AMBER ANAK MERVIN", "EVELYN SENA ANAK USSIK", 
+            "FAZRI BIN BAKERI", "HAIROL BIN ISMAIL", "HAZUANI BINTI HIPNI", "HELLEN RANJA ANAK BELI", 
+            "HILWA HAYATI BINTI MOHAMAD AJALAN", "JACQUELINE TIONG HOE DING", "JERIAH ANAK SIMON", 
+            "JIMMY ANAK PETER", "KAMARIA BINTI BUJANG", "KHAIRI BIN SAHARI", "LING MEE CHOO", 
+            "MARIATI BINTI JULAIHI", "MARY JANE AMOI UMPANG ANAK DANIEL MAWAT", "MOHAMAD ABIDIN BIN SIPEK", 
+            "MOHD RAFEEQ BIN SULAIMAN", "MUHAMMAD ZULHUSAINI BIN ABDUL WAHAB", "NORAISYAH BINTI ASHARI", 
+            "NORMIRI BINTI ABDULLAH", "NUR AZLIN BINTI NORIZAN", "NUR FADZLIAH AMAL BINTI OSMAN", 
+            "NUR HIDAYU BINTI YUSOP", "NURUL HUDA BTE MOHD IHWAN", "SABARIAH BINTI SOLHI", 
+            "SALIHIN BIN AHMAD", "SYAEEZA LIANA BINTI RAMLI", "TENG RU YUN", "TING HUA EE", 
+            "TING YU YONG", "VANITHA A/P SUBRAMANIAM", "WONG PICK KING", "ZEPRINA ANAK BENIK"
         ];
 
         // --- Konfigurasi Firebase Sekolah Cikgu ---
@@ -70,9 +87,9 @@
         const appId = "etakwimskpkm";
 
         function App() {
-            // State Pengguna & Peranan
+            // State Pengguna & Peranan (Lalai: Guru/User)
             const [user, setUser] = useState(null);
-            const [role, setRole] = useState('pk');
+            const [role, setRole] = useState('user');
 
             // State Kalendar
             const [currentDate, setCurrentDate] = useState(new Date());
@@ -88,7 +105,12 @@
             const [approvingEventId, setApprovingEventId] = useState(null);
             const [icInput, setIcInput] = useState('');
             const [icError, setIcError] = useState('');
+            const [approvalUnitFilter, setApprovalUnitFilter] = useState('ALL'); // State untuk filter unit kelulusan
             
+            // State Edit (Kemaskini)
+            const [isEditing, setIsEditing] = useState(false);
+            const [editingId, setEditingId] = useState(null);
+
             // State Borang
             const [newEvent, setNewEvent] = useState({ 
                 title: '', namaGuru: '', unit: '', kategori: 'PROGRAM SEKOLAH', description: '', time: '' 
@@ -148,15 +170,37 @@
                 return `${year}-${mm}-${dd}`;
             };
 
+            // Buka Modal Tambah (Reset Form)
+            const openAddModal = () => {
+                setIsEditing(false);
+                setEditingId(null);
+                setNewEvent({ title: '', namaGuru: '', unit: '', kategori: 'PROGRAM SEKOLAH', description: '', time: '' });
+                setShowAddModal(true);
+            };
+
+            // Buka Modal untuk Kemaskini (Isi Form)
+            const handleEditClick = (eventToEdit) => {
+                setIsEditing(true);
+                setEditingId(eventToEdit.id);
+                setNewEvent({
+                    title: eventToEdit.title,
+                    namaGuru: eventToEdit.namaGuru || '',
+                    unit: eventToEdit.unit || '',
+                    kategori: eventToEdit.kategori || 'PROGRAM SEKOLAH',
+                    description: eventToEdit.description || '',
+                    time: eventToEdit.time || ''
+                });
+                setSelectedDate(eventToEdit.date);
+                setShowAddModal(true);
+                setShowListModal(false); // Tutup senarai penuh jika dibuka dari sana
+            };
+
             // 4. Pengurusan Firestore
             const handleAddEvent = async (e) => {
                 e.preventDefault();
                 if (!newEvent.title || !user) return;
                 setIsSubmitting(true);
                 try {
-                    const newEventId = `event_${Date.now()}`;
-                    const eventRef = doc(db, 'artifacts', appId, 'public', 'data', 'takwim_events', newEventId);
-                    
                     const eventData = {
                         title: newEvent.title,
                         namaGuru: newEvent.namaGuru,
@@ -164,16 +208,29 @@
                         kategori: newEvent.kategori,
                         description: newEvent.description,
                         time: newEvent.time || 'Sepanjang hari',
-                        date: selectedDate,
-                        createdBy: user.uid,
-                        status: (role === 'pk' || role === 'gb') ? 'approved' : 'pending',
-                        createdAt: new Date().toISOString()
+                        date: selectedDate
                     };
-                    await setDoc(eventRef, eventData);
+
+                    if (isEditing) {
+                        // Proses Kemaskini (Update)
+                        const eventRef = doc(db, 'artifacts', appId, 'public', 'data', 'takwim_events', editingId);
+                        await updateDoc(eventRef, eventData);
+                    } else {
+                        // Proses Tambah Baru (Create)
+                        const newEventId = `event_${Date.now()}`;
+                        const eventRef = doc(db, 'artifacts', appId, 'public', 'data', 'takwim_events', newEventId);
+                        eventData.createdBy = user.uid;
+                        eventData.status = (role === 'pk' || role === 'gb') ? 'approved' : 'pending';
+                        eventData.createdAt = new Date().toISOString();
+                        await setDoc(eventRef, eventData);
+                    }
+                    
                     setNewEvent({ title: '', namaGuru: '', unit: '', kategori: 'PROGRAM SEKOLAH', description: '', time: '' });
                     setShowAddModal(false);
+                    setIsEditing(false);
+                    setEditingId(null);
                 } catch (error) {
-                    console.error("Ralat menambah aktiviti:", error);
+                    console.error("Ralat menyimpan aktiviti:", error);
                 } finally {
                     setIsSubmitting(false);
                 }
@@ -187,18 +244,30 @@
             };
 
             const confirmApproveEvent = async () => {
-                if (role !== 'pk') return;
+                if (role !== 'pk' && role !== 'gb') return;
                 const cleanIcInput = icInput.replace(/-/g, '').trim();
-                const isValid = REKOD_PK.some(pk => pk.ic.replace(/-/g, '') === cleanIcInput);
+                
+                // Cari aktiviti yang sedang disahkan
+                const eventToApprove = events.find(e => e.id === approvingEventId);
+                if (!eventToApprove) return;
 
-                if (!isValid) {
-                    setIcError('No. Kad Pengenalan tidak sah atau tiada dalam rekod Penolong Kanan.');
+                const eventUnit = eventToApprove.unit;
+
+                // Semak IC dan pastikan kuasa unit bertepatan
+                const authorizedPK = REKOD_PK.find(pk => {
+                    const isIcMatch = pk.ic.replace(/-/g, '') === cleanIcInput;
+                    const hasUnitAuth = eventUnit ? pk.units.includes(eventUnit) : true;
+                    return isIcMatch && hasUnitAuth;
+                });
+
+                if (!authorizedPK) {
+                    setIcError(`No. Kad Pengenalan tidak sah atau anda tiada akses pengesahan untuk Unit ${eventUnit || 'ini'}.`);
                     return;
                 }
 
                 try {
                     const eventRef = doc(db, 'artifacts', appId, 'public', 'data', 'takwim_events', approvingEventId);
-                    await updateDoc(eventRef, { status: 'approved', diluluskanOlehIC: cleanIcInput });
+                    await updateDoc(eventRef, { status: 'approved', diluluskanOlehIC: cleanIcInput, diluluskanOlehNama: authorizedPK.nama });
                     setShowIcModal(false);
                     setApprovingEventId(null);
                 } catch (error) {
@@ -263,7 +332,7 @@
                                     </button>
                                 </div>
 
-                                {role === 'pk' && (
+                                {(role === 'pk' || role === 'gb') && (
                                     <button onClick={() => setShowApprovalModal(true)} className="relative p-2 text-slate-600 hover:text-blue-600 transition-colors bg-slate-100 hover:bg-blue-50 rounded-full" title="Kelulusan Aktiviti">
                                         <Clock size={20} />
                                         {pendingEventsCount > 0 && (
@@ -384,7 +453,10 @@
                                                                 <button onClick={() => initiateApproveEvent(event.id)} className="text-xs flex items-center gap-1 text-emerald-700 hover:text-emerald-800 bg-emerald-100 px-2 py-1 rounded border border-emerald-200"><CheckCircle size={14} /> Lulus</button>
                                                             )}
                                                             {(role === 'pk' || role === 'gb' || (role === 'user' && event.status === 'pending' && event.createdBy === user.uid)) && (
-                                                                <button onClick={() => handleDeleteEvent(event.id)} className="text-xs flex items-center gap-1 text-red-600 hover:text-red-700 bg-red-50 px-2 py-1 rounded border border-red-200"><Trash2 size={14} /> Padam</button>
+                                                                <>
+                                                                    <button onClick={() => handleEditClick(event)} className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-700 bg-blue-50 px-2 py-1 rounded border border-blue-200"><Edit size={14} /> Edit</button>
+                                                                    <button onClick={() => handleDeleteEvent(event.id)} className="text-xs flex items-center gap-1 text-red-600 hover:text-red-700 bg-red-50 px-2 py-1 rounded border border-red-200"><Trash2 size={14} /> Padam</button>
+                                                                </>
                                                             )}
                                                         </div>
                                                     </div>
@@ -394,18 +466,20 @@
                                     )}
                                 </div>
                                 <div className="p-6 border-t border-slate-100 bg-slate-50/50 rounded-b-2xl">
-                                    <button onClick={() => setShowAddModal(true)} className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-xl transition-colors shadow-sm"><Plus size={18} /> Cadang / Tambah Aktiviti</button>
+                                    <button onClick={openAddModal} className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-xl transition-colors shadow-sm"><Plus size={18} /> Cadang / Tambah Aktiviti</button>
                                 </div>
                             </div>
                         </div>
                     </main>
 
-                    {/* MODAL: TAMBAH AKTIVITI */}
+                    {/* MODAL: TAMBAH / KEMASKINI AKTIVITI */}
                     {showAddModal && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
                             <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
                                 <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                                    <h3 className="font-bold text-lg text-slate-800">{role === 'user' ? 'Cadang Aktiviti Baru' : 'Tambah Aktiviti Takwim'}</h3>
+                                    <h3 className="font-bold text-lg text-slate-800">
+                                        {isEditing ? 'Kemaskini Aktiviti' : (role === 'user' ? 'Cadang Aktiviti Baru' : 'Tambah Aktiviti Takwim')}
+                                    </h3>
                                     <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600"><XCircle size={24} /></button>
                                 </div>
                                 <form onSubmit={handleAddEvent} className="p-6 space-y-4">
@@ -425,12 +499,23 @@
                                     </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div>
-                                            <label className="block text-sm font-medium text-slate-700 mb-1">Nama Guru</label>
-                                            <input type="text" value={newEvent.namaGuru} onChange={(e) => setNewEvent({...newEvent, namaGuru: e.target.value})} className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none" placeholder="Cth: Cikgu Ahmad" required={role === 'user'} />
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Nama Guru / Staf</label>
+                                            <select value={newEvent.namaGuru} onChange={(e) => setNewEvent({...newEvent, namaGuru: e.target.value})} className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none bg-white" required={role === 'user'}>
+                                                <option value="">-- Pilih Nama --</option>
+                                                {SENARAI_GURU.map(guru => (
+                                                    <option key={guru} value={guru}>{guru}</option>
+                                                ))}
+                                            </select>
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-medium text-slate-700 mb-1">Unit</label>
-                                            <input type="text" value={newEvent.unit} onChange={(e) => setNewEvent({...newEvent, unit: e.target.value})} className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none" placeholder="Cth: Kurikulum" required={role === 'user'} />
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">Pengesahan Unit (PK)</label>
+                                            <select value={newEvent.unit} onChange={(e) => setNewEvent({...newEvent, unit: e.target.value})} className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none bg-white" required={role === 'user'}>
+                                                <option value="">-- Pilih Unit --</option>
+                                                <option value="Pentadbiran">Pentadbiran</option>
+                                                <option value="Kurikulum">Kurikulum</option>
+                                                <option value="Hal Ehwal Murid (HEM)">Hal Ehwal Murid (HEM)</option>
+                                                <option value="Kokurikulum">Kokurikulum</option>
+                                            </select>
                                         </div>
                                     </div>
                                     <div>
@@ -447,9 +532,11 @@
                                     </div>
                                     <div className="pt-4 border-t border-slate-100 flex justify-end gap-3">
                                         <button type="button" onClick={() => setShowAddModal(false)} className="px-5 py-2.5 text-sm font-medium text-slate-600 bg-slate-100 rounded-lg">Batal</button>
-                                        <button type="submit" disabled={isSubmitting} className="px-5 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-lg disabled:opacity-70">{isSubmitting ? 'Menyimpan...' : ((role === 'pk' || role === 'gb') ? 'Simpan' : 'Hantar')}</button>
+                                        <button type="submit" disabled={isSubmitting} className="px-5 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-lg disabled:opacity-70">
+                                            {isSubmitting ? 'Menyimpan...' : (isEditing ? 'Kemaskini' : ((role === 'pk' || role === 'gb') ? 'Simpan' : 'Hantar'))}
+                                        </button>
                                     </div>
-                                    {role === 'user' && (
+                                    {!isEditing && role === 'user' && (
                                         <p className="text-xs text-amber-600 flex items-start gap-1.5 bg-amber-50 p-3 rounded-lg border border-amber-100">
                                             <ShieldAlert size={14} className="shrink-0 mt-0.5" /> Nota: Memerlukan pengesahan PK.
                                         </p>
@@ -460,10 +547,10 @@
                     )}
 
                     {/* MODAL: KELULUSAN PK */}
-                    {showApprovalModal && role === 'admin' && (
+                    {showApprovalModal && (role === 'pk' || role === 'gb') && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
                             <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
-                                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                                <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-50/50">
                                     <div className="flex items-center gap-3">
                                         <div className="bg-amber-100 p-2 rounded-lg text-amber-700"><Clock size={20} /></div>
                                         <div>
@@ -471,23 +558,36 @@
                                             <p className="text-sm text-slate-500">{pendingEventsCount} aktiviti dicadangkan</p>
                                         </div>
                                     </div>
-                                    <button onClick={() => setShowApprovalModal(false)} className="text-slate-400 hover:bg-slate-100 p-2 rounded-full"><XCircle size={20} /></button>
+                                    <div className="flex items-center gap-3 w-full sm:w-auto">
+                                        <select value={approvalUnitFilter} onChange={(e) => setApprovalUnitFilter(e.target.value)} className="border rounded-lg px-3 py-2 outline-none text-sm font-medium">
+                                            <option value="ALL">Semua Unit</option>
+                                            <option value="Pentadbiran">Pentadbiran</option>
+                                            <option value="Kurikulum">Kurikulum</option>
+                                            <option value="Hal Ehwal Murid (HEM)">Hal Ehwal Murid (HEM)</option>
+                                            <option value="Kokurikulum">Kokurikulum</option>
+                                        </select>
+                                        <button onClick={() => setShowApprovalModal(false)} className="text-slate-400 hover:bg-slate-100 p-2 rounded-full"><XCircle size={20} /></button>
+                                    </div>
                                 </div>
                                 <div className="p-6 overflow-y-auto flex-1 bg-slate-50/30">
-                                    {pendingEventsList.length === 0 ? (
-                                        <div className="text-center py-12 text-slate-500">Tiada aktiviti tertunggak.</div>
+                                    {pendingEventsList.filter(e => approvalUnitFilter === 'ALL' || e.unit === approvalUnitFilter).length === 0 ? (
+                                        <div className="text-center py-12 text-slate-500">Tiada aktiviti tertunggak untuk kategori ini.</div>
                                     ) : (
                                         <div className="space-y-4">
-                                            {pendingEventsList.map(event => (
+                                            {pendingEventsList
+                                                .filter(event => approvalUnitFilter === 'ALL' || event.unit === approvalUnitFilter)
+                                                .map(event => (
                                                 <div key={event.id} className="bg-white p-5 rounded-xl border flex flex-col sm:flex-row gap-4 justify-between items-start">
                                                     <div>
                                                         <span className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded mr-2">{new Date(event.date).toLocaleDateString('ms-MY')}</span>
+                                                        {event.unit && <span className="bg-purple-100 text-purple-800 text-xs font-bold px-2 py-0.5 rounded mr-2 uppercase">UNIT {event.unit}</span>}
                                                         <span className="text-slate-400 text-sm">{event.time}</span>
                                                         <h4 className="font-bold text-lg mt-1">{event.title}</h4>
+                                                        {event.namaGuru && <p className="text-sm text-slate-600 mt-1 flex items-center gap-1"><UserCircle size={14}/> {event.namaGuru}</p>}
                                                     </div>
                                                     <div className="flex gap-2">
-                                                        <button onClick={() => handleDeleteEvent(event.id)} className="px-4 py-2 border border-red-200 text-red-600 rounded-lg text-sm"><XCircle size={16} /> Tolak</button>
-                                                        <button onClick={() => initiateApproveEvent(event.id)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm"><CheckCircle size={16} /> Lulus</button>
+                                                        <button onClick={() => handleDeleteEvent(event.id)} className="px-4 py-2 border border-red-200 text-red-600 rounded-lg text-sm hover:bg-red-50 transition"><XCircle size={16} /> Tolak</button>
+                                                        <button onClick={() => initiateApproveEvent(event.id)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700 transition"><CheckCircle size={16} /> Lulus</button>
                                                     </div>
                                                 </div>
                                             ))}
@@ -503,15 +603,21 @@
                         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
                             <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
                                 <div className="p-6 border-b border-slate-100">
-                                    <h3 className="font-bold text-lg">Sahkan No Kad Pengenalan</h3>
+                                    <h3 className="font-bold text-lg">Sahkan Pengesahan</h3>
+                                    <p className="text-sm text-slate-500 mt-1">
+                                        Sila masukkan No. Kad Pengenalan anda.
+                                        {events.find(e => e.id === approvingEventId)?.unit && (
+                                            <span className="block mt-1 font-semibold text-indigo-600">Unit Terlibat: {events.find(e => e.id === approvingEventId).unit}</span>
+                                        )}
+                                    </p>
                                 </div>
                                 <div className="p-6 space-y-4">
-                                    <input type="text" value={icInput} onChange={(e) => setIcInput(e.target.value)} placeholder="Cth: 910110136471" className="w-full border rounded-lg px-4 py-3 text-center text-lg" />
-                                    {icError && <p className="text-red-500 text-sm text-center">{icError}</p>}
+                                    <input type="text" value={icInput} onChange={(e) => setIcInput(e.target.value)} placeholder="Masukkan IC anda (Cth: 910110136471)" className="w-full border rounded-lg px-4 py-3 text-center text-lg" />
+                                    {icError && <p className="text-red-500 text-sm text-center bg-red-50 p-2 rounded">{icError}</p>}
                                 </div>
                                 <div className="p-4 bg-slate-50 flex justify-end gap-3">
-                                    <button onClick={() => setShowIcModal(false)} className="px-5 py-2.5 border rounded-lg">Batal</button>
-                                    <button onClick={confirmApproveEvent} className="px-5 py-2.5 bg-emerald-600 text-white rounded-lg">Sahkan</button>
+                                    <button onClick={() => setShowIcModal(false)} className="px-5 py-2.5 border border-slate-200 rounded-lg bg-white text-slate-600 hover:bg-slate-100 transition">Batal</button>
+                                    <button onClick={confirmApproveEvent} className="px-5 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition">Sahkan</button>
                                 </div>
                             </div>
                         </div>
@@ -521,48 +627,74 @@
                     {showListModal && (
                         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
                             <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col">
-                                <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-50/50">
                                     <div className="flex items-center gap-3">
                                         <div className="bg-blue-100 p-2 rounded-lg text-blue-700"><List size={20} /></div>
-                                        <div><h3 className="font-bold text-lg">Senarai Penuh</h3></div>
+                                        <div>
+                                            <h3 className="font-bold text-lg text-slate-800">Senarai Penuh</h3>
+                                            <p className="text-sm text-slate-500">Semua aktiviti yang dipaparkan dalam takwim</p>
+                                        </div>
                                     </div>
-                                    <div className="flex items-center gap-3">
-                                        <select value={listFilter} onChange={(e) => setListFilter(e.target.value)} className="border rounded-lg px-3 py-2">
-                                            <option value="ALL">Semua</option>
+                                    <div className="flex items-center gap-3 w-full sm:w-auto">
+                                        <select value={listFilter} onChange={(e) => setListFilter(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 outline-none text-sm font-medium">
+                                            <option value="ALL">Semua Kategori</option>
                                             <option value="PROGRAM SEKOLAH">Program</option>
                                             <option value="CUTI">Cuti</option>
                                             <option value="PERINGATAN">Peringatan</option>
                                         </select>
-                                        <button onClick={() => setShowListModal(false)} className="p-2 bg-slate-100 rounded-full"><XCircle size={20} /></button>
+                                        <button onClick={() => setShowListModal(false)} className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-full transition"><XCircle size={20} /></button>
                                     </div>
                                 </div>
                                 <div className="overflow-y-auto flex-1 bg-white p-0">
-                                    <table className="w-full text-left text-sm">
-                                        <thead className="bg-slate-50 sticky top-0">
-                                            <tr>
-                                                <th className="py-4 px-6 border-b">Tarikh</th>
-                                                <th className="py-4 px-6 border-b">Kategori</th>
-                                                <th className="py-4 px-6 border-b">Aktiviti</th>
-                                                <th className="py-4 px-6 border-b">Masa</th>
-                                                <th className="py-4 px-6 border-b text-center">Tindakan</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {[...visibleEvents].filter(event => listFilter === 'ALL' || event.kategori === listFilter).sort((a, b) => new Date(a.date) - new Date(b.date)).map((event) => (
-                                                <tr key={event.id} className="border-b hover:bg-slate-50">
-                                                    <td className="py-3 px-6">{new Date(event.date).toLocaleDateString('ms-MY')}</td>
-                                                    <td className="py-3 px-6"><span className={`px-2.5 py-1 rounded-md text-[10px] font-bold ${getColorClass(event.kategori, 'bg')}`}>{event.kategori}</span></td>
-                                                    <td className="py-3 px-6 font-semibold">{event.title}</td>
-                                                    <td className="py-3 px-6">{event.time}</td>
-                                                    <td className="py-3 px-6 text-center">
-                                                        {(role === 'pk' || role === 'gb' || (role === 'user' && event.status === 'pending' && event.createdBy === user.uid)) && (
-                                                            <button onClick={() => handleDeleteEvent(event.id)} className="text-red-500"><Trash2 size={16} /></button>
-                                                        )}
-                                                    </td>
+                                    <div className="min-w-[600px]">
+                                        <table className="w-full text-left text-sm">
+                                            <thead className="bg-slate-50 sticky top-0 border-b border-slate-200">
+                                                <tr>
+                                                    <th className="py-4 px-6 font-semibold text-slate-600">Tarikh</th>
+                                                    <th className="py-4 px-6 font-semibold text-slate-600">Kategori</th>
+                                                    <th className="py-4 px-6 font-semibold text-slate-600">Aktiviti / Program</th>
+                                                    <th className="py-4 px-6 font-semibold text-slate-600">Masa</th>
+                                                    <th className="py-4 px-6 font-semibold text-slate-600 text-center">Tindakan</th>
                                                 </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
+                                            </thead>
+                                            <tbody>
+                                                {[...visibleEvents].filter(event => listFilter === 'ALL' || event.kategori === listFilter).sort((a, b) => new Date(a.date) - new Date(b.date)).map((event) => (
+                                                    <tr key={event.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                                                        <td className="py-3 px-6 whitespace-nowrap text-slate-700 font-medium">{new Date(event.date).toLocaleDateString('ms-MY', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                                                        <td className="py-3 px-6"><span className={`inline-block px-2.5 py-1 rounded-md text-[10px] font-bold tracking-wider uppercase ${getColorClass(event.kategori, 'bg')}`}>{event.kategori}</span></td>
+                                                        <td className="py-3 px-6">
+                                                            <div className="font-semibold text-slate-800">{event.title}</div>
+                                                            {(event.namaGuru || event.unit) && (
+                                                                <div className="text-xs text-slate-500 mt-1 flex items-center gap-1.5">
+                                                                    {event.namaGuru && <span>{event.namaGuru}</span>}
+                                                                    {event.namaGuru && event.unit && <span>•</span>}
+                                                                    {event.unit && <span>{event.unit}</span>}
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                        <td className="py-3 px-6 text-slate-600">{event.time}</td>
+                                                        <td className="py-3 px-6 text-center">
+                                                            {(role === 'pk' || role === 'gb' || (role === 'user' && event.status === 'pending' && event.createdBy === user.uid)) ? (
+                                                                <div className="flex items-center justify-center gap-2">
+                                                                    <button onClick={() => handleEditClick(event)} className="text-blue-500 hover:text-blue-700 hover:bg-blue-50 p-1.5 rounded transition-colors" title="Kemaskini Aktiviti"><Edit size={16} /></button>
+                                                                    <button onClick={() => handleDeleteEvent(event.id)} className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded transition-colors" title="Padam Aktiviti"><Trash2 size={16} /></button>
+                                                                </div>
+                                                            ) : (
+                                                                <span className="text-slate-300">-</span>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {visibleEvents.filter(event => listFilter === 'ALL' || event.kategori === listFilter).length === 0 && (
+                                                    <tr>
+                                                        <td colSpan="5" className="text-center py-12 text-slate-500">
+                                                            Tiada aktiviti didaftarkan untuk kategori ini.
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
                             </div>
                         </div>
